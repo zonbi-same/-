@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ブロック崩し</title>
+<style>
+body { margin:0; background:#fff; overflow:hidden; }
+canvas { display:block; }
+button {
+  position:fixed;
+  top:10px; left:10px;
+  z-index:10;
+  padding:10px 16px;
+}
+</style>
+</head>
+<body>
+
+<button onclick="init()">リセット</button>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+let W,H;
+function resize(){
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.onresize = resize;
+
+// ===== 設定 =====
+const gap = 2;
+const blockSize = 14;
+const cols = Math.floor(W / blockSize);
+
+// 🔥 ブロック増量（ここで空間調整）
+const rows = 34;
+
+// 壁の当たり判定の厚み
+const WALL_THICK = 6;
+
+// ===== 状態 =====
+let blocks, balls, items, paddle;
+
+// ===== 初期化 =====
+function init(){
+  blocks = [];
+  items = [];
+  balls = [{
+    x: W/2,
+    y: H-100,
+    dx: 5,
+    dy: -5,
+    r: 6
+  }];
+
+  paddle = {
+    w: 120,
+    h: 14,
+    x: W/2 - 60,
+    y: H - 50
+  };
+
+  createBlocks();
+}
+
+// ===== ブロック生成 =====
+function createBlocks(){
+  blocks = [];
+
+  const centerCol = Math.floor(cols/2);
+
+  for(let y=0; y<rows; y++){
+    for(let x=0; x<cols; x++){
+
+      // 中央の縦空白（横2マス）
+      if(x === centerCol || x === centerCol-1) continue;
+
+      let type = "block";
+
+      // 一番下は壊れない壁
+      if(y === rows-1){
+        type = "wall";
+      }
+
+      blocks.push({
+        x: x * blockSize,
+        y: y * blockSize,
+        w: blockSize - gap,
+        h: blockSize - gap,
+        type: type,
+        alive: true
+      });
+    }
+  }
+}
+
+// ===== マウス =====
+document.addEventListener("mousemove", e=>{
+  paddle.x = e.clientX - paddle.w/2;
+});
+
+// ===== 更新 =====
+function update(){
+
+  balls.forEach(b=>{
+    let prevX = b.x;
+    let prevY = b.y;
+
+    b.x += b.dx;
+    b.y += b.dy;
+
+    // 画面端
+    if(b.x < 0 || b.x > W) b.dx *= -1;
+    if(b.y < 0) b.dy *= -1;
+
+    // パドル
+    if(
+      b.x > paddle.x &&
+      b.x < paddle.x + paddle.w &&
+      b.y + b.r > paddle.y &&
+      b.y - b.r < paddle.y + paddle.h
+    ){
+      b.dy = -Math.abs(b.dy);
+
+      let center = paddle.x + paddle.w/2;
+      if(b.x > center) b.dx = Math.abs(b.dx);
+      else b.dx = -Math.abs(b.dx);
+    }
+
+    // ===== ブロック・壁 =====
+    for(let block of blocks){
+
+      if(!block.alive) continue;
+
+      // 壁（すり抜け防止）
+      if(block.type === "wall"){
+
+        if(
+          b.x > block.x &&
+          b.x < block.x + block.w &&
+          Math.abs(b.y - block.y) < WALL_THICK
+        ){
+          if(prevY < block.y){
+            b.y = block.y - WALL_THICK;
+            b.dy = -Math.abs(b.dy);
+          }else{
+            b.y = block.y + WALL_THICK;
+            b.dy = Math.abs(b.dy);
+          }
+          break;
+        }
+
+        continue;
+      }
+
+      // 通常ブロック
+      if(
+        b.x > block.x &&
+        b.x < block.x + block.w &&
+        b.y > block.y &&
+        b.y < block.y + block.h
+      ){
+
+        block.alive = false;
+
+        if(prevX < block.x || prevX > block.x + block.w) b.dx *= -1;
+        else b.dy *= -1;
+
+        // 己信（10%）
+        if(Math.random() < 0.1){
+          items.push({
+            x: block.x + block.w/2,
+            y: block.y,
+            size: 18
+          });
+        }
+
+        break;
+      }
+    }
+  });
+
+  // 玉消滅
+  balls = balls.filter(b => b.y < H + 50);
+
+  if(balls.length === 0){
+    init();
+    return;
+  }
+
+  // ===== 己信 =====
+  items.forEach(it=> it.y += H/240);
+
+  items = items.filter(it=>{
+    if(
+      it.x > paddle.x &&
+      it.x < paddle.x + paddle.w &&
+      it.y > paddle.y &&
+      it.y < paddle.y + paddle.h
+    ){
+
+      let n = balls.length;
+      let mult = 2;
+
+      if(n > 70) mult = 1.01;
+      else if(n > 40) mult = 1.1;
+      else if(n > 10) mult = 1.5;
+
+      let add = Math.min(Math.floor(n*(mult-1)), 130-n);
+
+      for(let i=0;i<add;i++){
+        let base = balls[i % balls.length];
+        balls.push({
+          x: base.x,
+          y: base.y,
+          dx: (Math.random()*2-1)*5,
+          dy: -Math.abs(Math.random()*5),
+          r: 6
+        });
+      }
+
+      return false;
+    }
+
+    return it.y < H;
+  });
+}
+
+// ===== 描画 =====
+function draw(){
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,W,H);
+
+  blocks.forEach(b=>{
+    if(!b.alive) return;
+
+    ctx.fillStyle = (b.type==="wall") ? "gray" : "red";
+    ctx.fillRect(b.x,b.y,b.w,b.h);
+  });
+
+  ctx.fillStyle="black";
+  ctx.fillRect(paddle.x,paddle.y,paddle.w,paddle.h);
+
+  ctx.fillStyle="blue";
+  balls.forEach(b=>{
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle="green";
+  ctx.font="12px sans-serif";
+  ctx.textAlign="center";
+
+  items.forEach(it=>{
+    ctx.fillRect(it.x-9,it.y-9,18,18);
+    ctx.fillStyle="#fff";
+    ctx.fillText("己信", it.x, it.y+4);
+    ctx.fillStyle="green";
+  });
+}
+
+// ===== ループ =====
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+init();
+loop();
+</script>
+</body>
+</html>
